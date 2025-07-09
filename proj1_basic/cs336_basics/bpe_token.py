@@ -3,10 +3,12 @@ from typing import Callable
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
-
 def _convert_token(word: re.Match[str]) -> tuple[bytes, ...]:
-    return tuple(
-        bytes([b]) for b in bytes(word.group(0).strip(), 'utf-8'))
+    text = word.group(0)
+    #print(text)
+    #if text in special_char:
+    #    return (text.encode('utf-8'),)
+    return tuple(bytes([b]) for b in text.encode('utf-8'))
 
 
 def _replace_pair(A: tuple[bytes, ...], B: tuple[bytes, ...]) -> tuple[bytes, ...]: # actually B is a pair of bytes
@@ -38,6 +40,8 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
     """
     #TODO: Change this fixed iteration parameter
     MERGE_ITER = vocab_size - len(special_tokens) - 256  # Number of merge iterations
+    pattern = b"|".join(re.escape(tok.encode("utf-8")) for tok in special_tokens)
+    regex = re.compile(pattern)
 
     # Step #1: Vocabulary initialization 
     vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
@@ -48,9 +52,11 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
     # read the input file
     with open(input_path, 'rb') as f:
         data = f.read()
+    # remove special tokens and split on them into segments
+    segments = regex.split(data)
 
-    for line in data.splitlines():
-        tokens  = re.finditer(PAT, line.decode('utf-8'))
+    for s in segments:
+        tokens  = re.finditer(PAT, s.decode('utf-8'))
         tokens  = [_convert_token(match) for match in tokens]
         for t in tokens:
             if t not in freq_table:
@@ -91,4 +97,5 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
     return vocab, merges
 
 
-#bpe_train('test.txt', 1000, ['<|endoftext|>'])
+#vocab, merge = bpe_train('test.txt', 1000, ['<|endoftext|>'])
+#print(merge)

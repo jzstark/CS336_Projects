@@ -10,15 +10,18 @@ PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s
 def _convert_token(word: re.Match[str]) -> tuple[bytes, ...]:
     text = word.group(0)
     return tuple(bytes([b]) for b in text.encode('utf-8'))
-    
+
+
 def _replace_pair(A: tuple[bytes, ...], B: tuple[bytes, ...]) -> \
-    tuple[tuple[bytes, ...], dict[tuple[bytes, bytes], int]]: # actually B is a pair of bytes
+    tuple[bool, tuple[bytes, ...], dict[tuple[bytes, bytes], int]]: # actually B is a pair of bytes
+    token_updated = False
     result = []
     update = defaultdict(int)
     i = 0
     while i < len(A):
         if i < len(A) - 1 and A[i] == B[0] and A[i + 1] == B[1]:
             result.append(B[0] + B[1])  # Join the two matched chars
+            token_updated = True
 
             if i > 0 : 
                 update[(A[i - 1], A[i])] -= 1
@@ -32,7 +35,7 @@ def _replace_pair(A: tuple[bytes, ...], B: tuple[bytes, ...]) -> \
         else:
             result.append(A[i])
             i += 1
-    return tuple(result), update
+    return token_updated, tuple(result), update
 
 
 def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
@@ -81,7 +84,6 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
     # Step #3: Merging
 
     # remove () as key from freq_table:
-    freq_table = {k: v for k, v in freq_table.items() if len(k) > 1}
 
     pair_table : dict[tuple[bytes, bytes], int] = {}
     for (char_tuple, cnt) in freq_table.items():
@@ -91,22 +93,29 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
                 pair_table[pair] = 0
             pair_table[pair] += cnt
 
+    total_time_ns = 0.0
+
     for _ in range(MERGE_ITER):
         max_comb = max(pair_table, key = lambda k: (pair_table[k], k))
         merges.append(max_comb)
 
         # tmp corpus/freq_table 
-        freq_table2 : dict[tuple[bytes,...], int]  = {}
+        freq_table2 = freq_table.copy()
         for (char_tuple, cnt) in freq_table.items():
-            updated_tuple, pair_updates = _replace_pair(char_tuple, max_comb)
-            freq_table2[updated_tuple] = freq_table[char_tuple]
             
+            # Most of the time spent here: updating the token frequency corpus 
+            corpus_changed, updated_tuple, pair_updates = _replace_pair(char_tuple, max_comb)
+            if corpus_changed:
+                freq_table2[updated_tuple] = freq_table2.pop(char_tuple)
+
             # keep updating the pair_table 
+            # start_ns = time.perf_counter_ns()
             pair_table.pop(max_comb, None)
             for (pair, update_cnt) in pair_updates.items():
                 if pair not in pair_table:
                     pair_table[pair] = 0
                 pair_table[pair] += update_cnt * cnt          
+            # total_time_ns += time.perf_counter_ns() - start_ns
 
         freq_table = freq_table2
 
@@ -121,10 +130,11 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
 
     print(f"Pre-tokenization time: {end1 - start:.2f} seconds")
     print(f"Merge time: {end2 - end1:.2f} seconds")
+    print(f"Total time: {total_time_ns / 1e9:.6f} seconds")
     
     # print(merges)        
     return vocab, merges
 
 
-#vocab, merge = bpe_train('test.txt', 1000, ['<|endoftext|>'])
+vocab, merge = bpe_train('test.txt', 1000, ['<|endoftext|>'])
 #print(merge)

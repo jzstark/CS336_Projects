@@ -1,14 +1,17 @@
 from collections.abc import Iterable, Iterator
-#from bpe_token import bpe_train, PAT
-from .bpe_token import bpe_train, PAT
+from bpe_token import bpe_train, PAT
+#from .bpe_token import bpe_train, PAT
 import regex as re
 
 def custom_split(text: str, special_tokens: list[str], default_pattern=PAT):
+    if special_tokens == []:        
+        return [m.group(0) for m in re.finditer(default_pattern, text) if m.group(0)]
+
     # Sort special tokens by length, longest first
     escaped = sorted((re.escape(tok) for tok in special_tokens), key=len, reverse=True)
-    # Pattern to split and keep delimiters (special tokens)
-    split_pat = f"({'|'.join(escaped)})"
-    parts = re.split(split_pat, text)
+    pattern = f"({'|'.join(escaped)})"
+    parts = re.split(pattern, text)
+    
     tokens = []
     for part in parts:
         if not part:
@@ -36,7 +39,7 @@ class Tokenizer :
             self.special_tokens_byte = []
         else:
             self.special_tokens_byte = [tuple([bytes([b]) for b in token.encode('utf-8')]) for token in special_tokens]
-        self.reverse_vocab = {v: k for k, v in vocab.items()}   
+        self.reverse_vocab = {v: k for k, v in vocab.items()} 
     
 
     def _merge_token(self, token : tuple[bytes, ...], ) -> tuple[bytes, ...]:

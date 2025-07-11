@@ -1,11 +1,27 @@
 from collections.abc import Iterable, Iterator
-from .bpe_token import bpe_train, convert_token, PAT
+#from bpe_token import bpe_train, PAT
+from .bpe_token import bpe_train, PAT
 import regex as re
 
 def custom_split(text: str, special_tokens: list[str], default_pattern=PAT):
-    escaped = [re.escape(tok) for tok in special_tokens]
-    pattern = f"({'|'.join(escaped)})|({default_pattern})"
-    return re.finditer(pattern, text)
+    # Sort special tokens by length, longest first
+    escaped = sorted((re.escape(tok) for tok in special_tokens), key=len, reverse=True)
+    # Pattern to split and keep delimiters (special tokens)
+    split_pat = f"({'|'.join(escaped)})"
+    parts = re.split(split_pat, text)
+    tokens = []
+    for part in parts:
+        if not part:
+            continue
+        if part in special_tokens:
+            tokens.append(part)
+        else:
+            tokens.extend([m.group(0) for m in re.finditer(default_pattern, part) if m.group(0)])
+    return tokens
+
+
+def convert_token(text: str) -> tuple[bytes, ...]:
+    return tuple(bytes([b]) for b in text.encode('utf-8'))
 
 
 class Tokenizer :
@@ -31,7 +47,7 @@ class Tokenizer :
             pairs = [(token[i], token[i+1]) for i in range(len(token)-1)]
             merge_candidate = None 
             for pair in pairs:
-                if pair in self.merges:
+                if pair[0] + pair[1] in  self.reverse_vocab:
                     merge_candidate = pair
                     break
             if merge_candidate is None: break
@@ -53,7 +69,7 @@ class Tokenizer :
     def encode(self, text : str) -> list[int]:
         #matches  = re.finditer(PAT, text)
         matches = custom_split(text, self.special_tokens)
-        
+
         # parallelizable
         tokens  = [convert_token(match) for match in matches]
         tokens = [self._merge_token(token) for token in tokens]
@@ -74,7 +90,8 @@ class Tokenizer :
         ret = b''
         for id in ids:
             ret = ret + self.vocab.get(id, b'')
-        return ret.decode('utf-8')
+        #print(ret)
+        return ret.decode('utf-8', errors='replace')
 
 
 def from_file(vocab_filepath: str, merges_filepath: str, 

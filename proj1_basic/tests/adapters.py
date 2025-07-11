@@ -11,6 +11,7 @@ from torch import Tensor
 
 from cs336_basics.bpe_token import bpe_train
 from cs336_basics.tokenizer import Tokenizer
+from cs336_basics.transformer import Linear
 
 
 def run_linear(
@@ -31,8 +32,9 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    linear_layer = Linear(d_in, d_out)
+    linear_layer.weight.data = weights
+    return linear_layer(in_features) 
 
 
 def run_embedding(

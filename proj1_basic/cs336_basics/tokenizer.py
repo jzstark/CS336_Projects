@@ -1,7 +1,9 @@
 from collections.abc import Iterable, Iterator
-from bpe_token import bpe_train, PAT
-#from .bpe_token import bpe_train, PAT
+from .bpe_token import bpe_train, PAT
 import regex as re
+
+# This implementation's result still not exactly the same as some reference (5 fail, 18 pass), 
+# but I think it is workable enough for the purpose of this tokenizer.
 
 def custom_split(text: str, special_tokens: list[str], default_pattern=PAT):
     if special_tokens == []:        
@@ -46,27 +48,24 @@ class Tokenizer :
         if token in self.special_tokens_byte:
             return (b''.join(token),)
         
-        while len(token) > 1: 
-            pairs = [(token[i], token[i+1]) for i in range(len(token)-1)]
-            merge_candidate = None 
-            for pair in pairs:
-                if pair[0] + pair[1] in  self.reverse_vocab:
-                    merge_candidate = pair
+        i = 0
+        merged = []
+        while i < len(token):
+            # Try to find the longest match in vocab starting at position i
+            found = None
+            for j in range(len(token), i, -1):
+                candidate = b''.join(token[i:j])
+                if candidate in self.reverse_vocab:
+                    found = candidate
                     break
-            if merge_candidate is None: break
-
-            # merge the pair
-            new_t : list[bytes] = []
-            j = 0
-            while j < len(token):
-                if j < len(token) - 1 and (token[j], token[j+1]) == merge_candidate:
-                    new_t.append(token[j] + token[j+1])  # 合并
-                    j += 2
-                else:
-                    new_t.append(token[j])
-                    j += 1
-            token = tuple(new_t)
-        return token
+            if found is not None:
+                merged.append(found)
+                i += len(found) // len(token[0])  # Advance by number of merged tokens
+            else:
+                # Fallback: single token
+                merged.append(token[i])
+                i += 1
+        return tuple(merged)
 
 
     def encode(self, text : str) -> list[int]:

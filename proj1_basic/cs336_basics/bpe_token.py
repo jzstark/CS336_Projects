@@ -7,8 +7,9 @@ import time
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
-def _convert_token(word: re.Match[str]) -> tuple[bytes, ...]:
+def convert_token(word: re.Match[str]) -> tuple[bytes, ...]:
     text = word.group(0)
+    #text = word.group(0).strip()
     return tuple(bytes([b]) for b in text.encode('utf-8'))
 
 
@@ -74,7 +75,7 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
 
     for s in segments:
         tokens  = re.finditer(PAT, s.decode('utf-8'))
-        tokens  = [_convert_token(match) for match in tokens]
+        tokens  = [convert_token(match) for match in tokens]
         for t in tokens:
             if t not in freq_table:
                 freq_table[t] = 0
@@ -96,6 +97,8 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
     total_time_ns = 0.0
 
     for _ in range(MERGE_ITER):
+        if pair_table == {}:
+            continue
         max_comb = max(pair_table, key = lambda k: (pair_table[k], k))
         merges.append(max_comb)
 
@@ -136,5 +139,5 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> tu
     return vocab, merges
 
 
-vocab, merge = bpe_train('test.txt', 1000, ['<|endoftext|>'])
+#vocab, merge = bpe_train('test.txt', 1000, ['<|endoftext|>'])
 #print(merge)

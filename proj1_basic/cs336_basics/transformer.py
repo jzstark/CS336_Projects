@@ -75,3 +75,22 @@ class RMSNorm(torch.nn.Module):
         return x.to(in_dtype)
     
 
+class SwiGLU(torch.nn.Module):
+    def __init__(self, d_model: int, d_ff: int, 
+                 device: torch.device | None = None, 
+                 dtype : torch.dtype  | None = None):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.device = device if device is not None else torch.device('cpu')
+        self.dtype  = dtype if dtype is not None else torch.float32
+
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model,    device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
+
+    def forward(self, x: Float[Tensor, "... d_model"]) -> torch.Tensor:
+        x1 = torch.nn.functional.silu(self.w1(x))
+        x2 = self.w3(x)
+        return self.w2(x1 * x2)
+

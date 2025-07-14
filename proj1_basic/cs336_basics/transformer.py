@@ -1,6 +1,8 @@
 import torch 
 from torch import nn
 import numpy as np
+from jaxtyping import Float, Int
+from torch import Tensor
 
 from einops import rearrange, einsum
 
@@ -48,4 +50,28 @@ class Embedding(torch.nn.Module):
             torch.Tensor: Tensor of shape (..., seq_len, embedding_dim) containing embeddings.
         """
         return self.parameter[token_ids]
+
+
+
+class RMSNorm(torch.nn.Module):
+    def __init__(self, d_model: int, eps: float = 1e-5, 
+                 device: torch.device | None = None, dtype: torch.dtype | None = None):
+        super().__init__()
+        self.d_model = d_model
+        self.eps = eps
+        self.device = device if device is not None else torch.device('cpu')
+        self.dtype = dtype if dtype is not None else torch.float32
+        self.gain = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype), requires_grad=True)
+    
+    def _rms(self, x: Float[Tensor, "self_d_model"]) -> Float:
+        return torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
+
+    def forward(self, x : Float[Tensor, " ... self_d_model"]) -> torch.Tensor:
+        # input shape: (batch, seq_len, d_model) 
+        in_dtype = x.dtype
+        x = x.to(self.dtype)
+        norm = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
+        x = x / norm * self.gain
+        return x.to(in_dtype)
+    
 

@@ -1,7 +1,7 @@
 import torch 
 from torch import nn
 import numpy as np
-from jaxtyping import Float, Int
+from jaxtyping import Float, Int, Bool
 from torch import Tensor
 
 from einops import rearrange, einsum
@@ -183,3 +183,95 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         x_rotated = torch.stack((x_rotated_even, x_rotated_odd), dim=-1)
         x_rotated = x_rotated.flatten(-2)
         return x_rotated
+
+    
+def softmax(x: Float[Tensor, "... d_model"], dim: int = -1) -> Float[Tensor, "... d_model"]:
+    return torch.nn.functional.softmax(x, dim=dim)
+
+
+def scaled_dot_product_attention(
+        query: Float[Tensor, "batch ... seq_len d_k"],
+        key: Float[Tensor, "batch ... seq_len d_k"],
+        value: Float[Tensor, "batch ... seq_len d_v"],
+        mask: Bool[Tensor, "seq_len seq_len"] | None = None
+) -> Float[Tensor, "batch ... seq_len d_v"]:
+    d_k = query.shape[-1]
+    scores = torch.einsum('... i d, ... j d -> ... i j', query, key) / np.sqrt(d_k)
+    #NOTE: this is the wrong implementation!!!
+    #scores = torch.einsum('... i d, ... i d -> ... i i', query, key) / np.sqrt(d_k)
+    if mask is not None:
+        scores = scores.masked_fill(mask == False, float('-inf'))
+    attn_weights = softmax(scores, dim=-1)
+    # NOTE: I cannot use 'seq_len' or 'd_v' in the einsum string here; only single letters are allowed 
+    return torch.einsum('... i j, ... j d-> ... i d', attn_weights, value)
+
+
+#TODO: wrong implementation 
+class MultiHeadAttention(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int, 
+                 max_seq_len: int = 2048, theta: float = 10000.0,
+                 token_positions: Int[Tensor, "seq_len"] | None = None, 
+                 use_rope: bool = False,
+                 device: torch.device | None = None, dtype: torch.dtype | None = None):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.device = device if device is not None else torch.device('cpu')
+        self.dtype = dtype if dtype is not None else torch.float32
+
+        # apply rope to q and k 
+        self.use_rope = use_rope
+        self.token_positions = token_positions
+        self.rope = RotaryPositionalEmbedding(theta=theta, d_k=d_model, max_seq_len=max_seq_len, device=self.device)
+
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+        self.d_k = d_model // num_heads
+        self.d_v = d_model // num_heads
+
+        self.query_linear = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.key_linear   = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.value_linear = Linear(d_model, d_model, device=device, dtype=dtype)
+        self.out_linear   = Linear(d_model, d_model, device=device, dtype=dtype)
+    
+    def update_weights(self,
+                       query_weight: Float[Tensor, "d_model d_model"],  
+                       key_weight: Float[Tensor, "d_model d_model"],
+                       value_weight: Float[Tensor, "d_model d_model"],
+                       out_weight: Float[Tensor, "d_model d_model"]) -> None:
+        with torch.no_grad():
+            self.query_linear.parameter.copy_(query_weight)
+            self.key_linear.parameter.copy_(key_weight)
+            self.value_linear.parameter.copy_(value_weight)
+            self.out_linear.parameter.copy_(out_weight)
+
+    def forward(self, 
+                x: Float[Tensor, "... seq_len d_model"],
+                mask: Bool[Tensor, "seq_len seq_len"] | None = None) -> Float[Tensor, "... seq_len d_model"]:
+        batch_size = x.shape[0]
+        seq_len = x.shape[-2] 
+
+        #TODO: check if this mask if correct 
+        if mask is None:
+            mask = torch.triu(torch.ones((seq_len, seq_len), device=self.device, dtype=torch.bool), diagonal=1)
+            mask = mask.bool()
+
+        # Linear projections
+        query: Float[Tensor, "... self_num_heads seq_len self_d_k"] = self.query_linear(x).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        key   = self.key_linear(x).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        value = self.value_linear(x).view(batch_size, -1, self.num_heads, self.d_v).transpose(1, 2)
+
+        # Apply Rotary Positional Embedding to query and key
+        if self.use_rope:
+            if self.token_positions is None:
+                token_positions = torch.arange(seq_len, device=self.device).unsqueeze(0).expand(batch_size, -1)
+            else:
+                token_positions = self.token_positions.unsqueeze(0).expand(batch_size, -1)
+            query = self.rope(query, token_positions)
+            key   = self.rope(key, token_positions)
+
+        # Scaled dot-product attention
+        attn_output = scaled_dot_product_attention(query, key, value, mask)
+
+        # Concatenate heads and apply final linear layer
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+        return self.out_linear(attn_output)

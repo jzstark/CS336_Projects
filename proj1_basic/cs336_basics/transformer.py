@@ -239,10 +239,10 @@ class MultiHeadAttention(torch.nn.Module):
                        value_weight: Float[Tensor, "d_model d_model"],
                        out_weight: Float[Tensor, "d_model d_model"]) -> None:
         with torch.no_grad():
-            self.query_linear.parameter.copy_(query_weight)
-            self.key_linear.parameter.copy_(key_weight)
-            self.value_linear.parameter.copy_(value_weight)
-            self.out_linear.parameter.copy_(out_weight)
+            self.query_linear.weight.copy_(query_weight)
+            self.key_linear.weight.copy_(key_weight)
+            self.value_linear.weight.copy_(value_weight)
+            self.out_linear.weight.copy_(out_weight)
 
     def forward(self, 
                 x: Float[Tensor, "... seq_len d_model"],
@@ -250,10 +250,8 @@ class MultiHeadAttention(torch.nn.Module):
         batch_size = x.shape[0]
         seq_len = x.shape[-2] 
 
-        #TODO: check if this mask if correct 
         if mask is None:
-            mask = torch.triu(torch.ones((seq_len, seq_len), device=self.device, dtype=torch.bool), diagonal=1)
-            mask = mask.bool()
+            mask = torch.tril(torch.ones(seq_len, seq_len, device=self.device,dtype=torch.bool))
 
         # Linear projections
         query: Float[Tensor, "... self_num_heads seq_len self_d_k"] = self.query_linear(x).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
@@ -265,7 +263,10 @@ class MultiHeadAttention(torch.nn.Module):
             if self.token_positions is None:
                 token_positions = torch.arange(seq_len, device=self.device).unsqueeze(0).expand(batch_size, -1)
             else:
-                token_positions = self.token_positions.unsqueeze(0).expand(batch_size, -1)
+                assert self.token_positions.shape[-1] == seq_len, \
+                    f"token_positions length {self.token_positions.shape[0]} does not match seq_len {seq_len}"
+                token_positions = self.token_positions
+            # rope: input: (..., seq_len, d), token_positions: (1, seq_len) or (seq_len,)
             query = self.rope(query, token_positions)
             key   = self.rope(key, token_positions)
 

@@ -102,6 +102,7 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         self.theta = theta
         self.d_k = d_k
         self.max_seq_len = max_seq_len
+        #print(f"Creating RotaryPositionalEmbedding with theta={theta}, d_k={d_k}, max_seq_len={max_seq_len}")
         self.device = device if device is not None else torch.device('cpu')
 
         assert d_k % 2 == 0, "d_k must be even for Rotary Positional Embedding, I guess"
@@ -131,6 +132,10 @@ class RotaryPositionalEmbedding(torch.nn.Module):
     def forward(self, x: Float[Tensor, " ...  seq_len d_k"], 
                 token_positions: Int[Tensor, "... seq_len"]) -> \
                 Float[Tensor, "... seq_len d_k"]:
+        assert x.shape[-1] == self.d_k, \
+            f"Input tensor last dimension {x.shape[-1]} does not match d_k {self.d_k}"
+        assert token_positions.shape[-1] == x.shape[-2], \
+            f"Token positions length {token_positions.shape[-1]} does not match sequence length {x.shape[-2]}"
         input_shape = x.shape
         seq_len = input_shape[-2]
         if seq_len > self.max_seq_len:
@@ -222,11 +227,12 @@ class MultiHeadAttention(torch.nn.Module):
         # apply rope to q and k 
         self.use_rope = use_rope
         self.token_positions = token_positions
-        self.rope = RotaryPositionalEmbedding(theta=theta, d_k=d_model, max_seq_len=max_seq_len, device=self.device)
 
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         self.d_k = d_model // num_heads
         self.d_v = d_model // num_heads
+        
+        self.rope = RotaryPositionalEmbedding(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len, device=self.device)
 
         self.query_linear = Linear(d_model, d_model, device=device, dtype=dtype)
         self.key_linear   = Linear(d_model, d_model, device=device, dtype=dtype)
@@ -238,6 +244,12 @@ class MultiHeadAttention(torch.nn.Module):
                        key_weight: Float[Tensor, "d_model d_model"],
                        value_weight: Float[Tensor, "d_model d_model"],
                        out_weight: Float[Tensor, "d_model d_model"]) -> None:
+        
+        assert query_weight.shape == self.query_linear.weight.shape
+        assert key_weight.shape == self.key_linear.weight.shape
+        assert value_weight.shape == self.value_linear.weight.shape
+        assert out_weight.shape == self.out_linear.weight.shape
+
         with torch.no_grad():
             self.query_linear.weight.copy_(query_weight)
             self.key_linear.weight.copy_(key_weight)
@@ -276,3 +288,65 @@ class MultiHeadAttention(torch.nn.Module):
         # Concatenate heads and apply final linear layer
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
         return self.out_linear(attn_output)
+    
+
+class TransformerBlock(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, 
+                 max_seq_len: int = 2048, theta: float = 10000.0, use_rope: bool = False,
+                 device: torch.device | None = None,
+                 dtype: torch.dtype | None = None):
+        super().__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.device = device if device is not None else torch.device('cpu')
+        self.dtype = dtype if dtype is not None else torch.float32
+        
+        self.attention = MultiHeadAttention(d_model=d_model, 
+                    num_heads=num_heads, device=device, dtype=dtype, 
+                    use_rope=use_rope, max_seq_len=max_seq_len, theta=theta)
+        self.ff = SwiGLU(d_model=d_model, d_ff=d_ff, device=device, dtype=dtype)
+        self.norm1 = RMSNorm(d_model=d_model, device=device, dtype=dtype)
+        self.norm2 = RMSNorm(d_model=d_model, device=device, dtype=dtype)
+
+    def forward(self, x: Float[Tensor, "... seq_len d_model"],
+                mask: Bool[Tensor, "seq_len seq_len"] | None = None) -> Float[Tensor, "... seq_len d_model"]:
+        # Multi-head attention
+        y = self.norm1(x)
+        attn_output = self.attention(y, mask)
+        x = y + attn_output
+        # Feed-forward network
+        y = self.norm2(x)
+        ff_output = self.ff(y)
+        x = y + ff_output
+        return x
+
+    #TODO: check the multi-head attention weights dimension order!!! 
+    def update_weights(self,
+                       query_weight: Float[Tensor, "d_model d_model"],  
+                       key_weight: Float[Tensor, "d_model d_model"],
+                       value_weight: Float[Tensor, "d_model d_model"],
+                       out_weight: Float[Tensor, "d_model d_model"],
+                       ff_weight1: Float[Tensor, "d_model d_ff"],
+                       ff_weight2: Float[Tensor, "d_model d_ff"],
+                       ff_weight3: Float[Tensor, "d_model d_ff"],
+                       # normalization weight
+                       ln_weight1: Float[Tensor, "d_model"] | None = None,
+                       ln_weight2: Float[Tensor, "d_model"] | None = None,
+                    ) -> None:
+        # Actually, should also check the shape of the weights
+        self.attention.update_weights(query_weight, key_weight, value_weight, out_weight)
+        with torch.no_grad():
+            assert self.ff.w1.weight.shape == ff_weight1.shape
+            assert self.ff.w2.weight.shape == ff_weight2.shape
+            assert self.ff.w3.weight.shape == ff_weight3.shape
+            
+            self.ff.w1.weight.copy_(ff_weight1)
+            self.ff.w2.weight.copy_(ff_weight2)
+            self.ff.w3.weight.copy_(ff_weight3)
+
+            assert self.norm1.gain.shape == ln_weight1.shape if ln_weight1 is not None else True
+            assert self.norm2.gain.shape == ln_weight2.shape if ln_weight2 is not None else True
+            if ln_weight1 is not None:
+                self.norm1.gain.copy_(ln_weight1)
+            if ln_weight2 is not None:
+                self.norm2.gain.copy_(ln_weight2)

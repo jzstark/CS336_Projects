@@ -11,7 +11,7 @@ from torch import Tensor
 
 from cs336_basics.bpe_token import bpe_train
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadAttention, softmax, scaled_dot_product_attention
+from cs336_basics.transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadAttention, TransformerBlock, softmax, scaled_dot_product_attention
 
 
 def run_linear(
@@ -159,6 +159,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
+    
+    #print(f"Running MHA with d_model={d_model}, num_heads={num_heads}")
+    #print(f"Q weight shape: {q_proj_weight.shape}, K weight shape: {k_proj_weight.shape}, V weight shape: {v_proj_weight.shape}, O weight shape: {o_proj_weight.shape}")
+    #print(f"In features shape: {in_features.shape}")
+
+    #NOTE: Actually, the input weight shape is (d_model, d_model), not (d_model // num_heads, d_model) or other things!!!
     multi_head_attention = MultiHeadAttention(
         d_model=d_model,
         num_heads=num_heads)
@@ -314,7 +320,27 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+
+    transformer_block_layer = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        use_rope=True,
+    )
+    transformer_block_layer.update_weights(
+        weights["attn.q_proj.weight"],
+        weights["attn.k_proj.weight"],
+        weights["attn.v_proj.weight"],
+        weights["attn.output_proj.weight"],
+        weights["ffn.w1.weight"],
+        weights["ffn.w2.weight"],
+        weights["ffn.w3.weight"],
+        weights["ln1.weight"],
+        weights["ln2.weight"],
+    )
+    return transformer_block_layer(in_features)
 
 
 def run_transformer_lm(

@@ -313,11 +313,11 @@ class TransformerBlock(torch.nn.Module):
         # Multi-head attention
         y = self.norm1(x)
         attn_output = self.attention(y, mask)
-        x = y + attn_output
+        x = x + attn_output
         # Feed-forward network
         y = self.norm2(x)
         ff_output = self.ff(y)
-        x = y + ff_output
+        x = x + ff_output
         return x
 
     #TODO: check the multi-head attention weights dimension order!!! 
@@ -330,11 +330,12 @@ class TransformerBlock(torch.nn.Module):
                        ff_weight2: Float[Tensor, "d_model d_ff"],
                        ff_weight3: Float[Tensor, "d_model d_ff"],
                        # normalization weight
-                       ln_weight1: Float[Tensor, "d_model"] | None = None,
-                       ln_weight2: Float[Tensor, "d_model"] | None = None,
+                       ln_weight1: Float[Tensor, "d_model"],
+                       ln_weight2: Float[Tensor, "d_model"],
                     ) -> None:
-        # Actually, should also check the shape of the weights
+        
         self.attention.update_weights(query_weight, key_weight, value_weight, out_weight)
+
         with torch.no_grad():
             assert self.ff.w1.weight.shape == ff_weight1.shape
             assert self.ff.w2.weight.shape == ff_weight2.shape
@@ -344,8 +345,8 @@ class TransformerBlock(torch.nn.Module):
             self.ff.w2.weight.copy_(ff_weight2)
             self.ff.w3.weight.copy_(ff_weight3)
 
-            assert self.norm1.gain.shape == ln_weight1.shape if ln_weight1 is not None else True
-            assert self.norm2.gain.shape == ln_weight2.shape if ln_weight2 is not None else True
+            assert self.norm1.gain.shape == ln_weight1.shape
+            assert self.norm2.gain.shape == ln_weight2.shape
             if ln_weight1 is not None:
                 self.norm1.gain.copy_(ln_weight1)
             if ln_weight2 is not None:

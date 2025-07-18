@@ -211,7 +211,6 @@ def scaled_dot_product_attention(
     return torch.einsum('... i j, ... j d-> ... i d', attn_weights, value)
 
 
-#TODO: wrong implementation 
 class MultiHeadAttention(torch.nn.Module):
     def __init__(self, d_model: int, num_heads: int, 
                  max_seq_len: int = 2048, theta: float = 10000.0,
@@ -320,7 +319,6 @@ class TransformerBlock(torch.nn.Module):
         x = x + ff_output
         return x
 
-    #TODO: check the multi-head attention weights dimension order!!! 
     def update_weights(self,
                        query_weight: Float[Tensor, "d_model d_model"],  
                        key_weight: Float[Tensor, "d_model d_model"],
@@ -351,3 +349,44 @@ class TransformerBlock(torch.nn.Module):
                 self.norm1.gain.copy_(ln_weight1)
             if ln_weight2 is not None:
                 self.norm2.gain.copy_(ln_weight2)
+
+
+
+class Transformer(torch.nn.Module):
+    def __init__(self, vocab_size: int, context_length: int, num_layers: int, 
+                 d_model: int, num_heads: int, d_ff: int, 
+                 max_seq_len: int = 2048, theta: float = 10000.0,
+                 use_rope: bool = False,
+                 device: torch.device | None = None,
+                 dtype: torch.dtype | None = None):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+        self.use_rope = use_rope
+
+        self.embedding = Embedding(num_embeddings=vocab_size, embedding_dim=d_model, device=device, dtype=dtype)
+
+        self.layers = nn.ModuleList([
+            TransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff,
+                             max_seq_len=max_seq_len, theta=theta, use_rope=use_rope,
+                             device=device, dtype=dtype) for _ in range(num_layers)
+        ])
+        self.norm_final = RMSNorm(d_model=d_model, device=device, dtype=dtype)
+        self.linear_out = Linear(d_model, vocab_size, device=device, dtype=dtype)
+
+    
+    def forward(self, x: Int[Tensor, "... seq_len"],
+                mask: Bool[Tensor, "seq_len seq_len"] | None = None) -> Float[Tensor, "... seq_len d_model"]:
+        x = self.embedding(x)
+        for layer in self.layers:
+            x = layer(x, mask)  
+        x = self.norm_final(x)
+        x = self.linear_out(x)
+        #NOTE: only returning x passes the tests, but the diagram shows there is a final softmax layer 
+        return x #softmax(x, dim=-1)

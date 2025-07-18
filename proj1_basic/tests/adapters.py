@@ -11,7 +11,7 @@ from torch import Tensor
 
 from cs336_basics.bpe_token import bpe_train
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadAttention, TransformerBlock, softmax, scaled_dot_product_attention
+from cs336_basics.transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadAttention, TransformerBlock, Transformer, softmax, scaled_dot_product_attention
 
 
 def run_linear(
@@ -422,7 +422,42 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer = Transformer(vocab_size=vocab_size,
+                              context_length=context_length,
+                              d_model=d_model,
+                              num_layers=num_layers,
+                              num_heads=num_heads,
+                              d_ff=d_ff,
+                              theta=rope_theta,
+                              use_rope=True)
+    
+    for i, block in enumerate(transformer.layers):
+        block.update_weights(
+            weights[f"layers.{i}.attn.q_proj.weight"],
+            weights[f"layers.{i}.attn.k_proj.weight"],
+            weights[f"layers.{i}.attn.v_proj.weight"],
+            weights[f"layers.{i}.attn.output_proj.weight"],
+            weights[f"layers.{i}.ffn.w1.weight"],
+            weights[f"layers.{i}.ffn.w2.weight"],
+            weights[f"layers.{i}.ffn.w3.weight"],
+            weights[f"layers.{i}.ln1.weight"],
+            weights[f"layers.{i}.ln2.weight"]
+        )
+    
+    assert transformer.embedding.weight.shape == weights["token_embeddings.weight"].shape, \
+        f"Expected token_embeddings.weight shape {weights['token_embeddings.weight'].shape}, got {transformer.embedding.weight.shape}"
+    assert transformer.norm_final.gain.shape == weights["ln_final.weight"].shape, \
+        f"Expected ln_final.weight shape {weights['ln_final.weight'].shape}, got {transformer.norm_final.gain.shape}"
+    assert transformer.linear_out.weight.shape == weights["lm_head.weight"].shape, \
+        f"Expected lm_head.weight shape {weights['lm_head.weight'].shape}, got {transformer.linear_out.weight.shape}"
+
+    with torch.no_grad():
+        transformer.embedding.weight.copy_(weights["token_embeddings.weight"])
+        transformer.norm_final.gain.copy_(weights["ln_final.weight"])
+        transformer.linear_out.weight.copy_(weights["lm_head.weight"])
+    
+    return transformer(in_indices)
+
 
 
 def run_rmsnorm(

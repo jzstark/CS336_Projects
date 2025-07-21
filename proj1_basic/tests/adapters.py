@@ -13,6 +13,9 @@ from cs336_basics.bpe_token import bpe_train
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.transformer import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadAttention, TransformerBlock, Transformer, softmax, scaled_dot_product_attention
 
+from cs336_basics.learning import cross_entropy_loss, AdamW
+from cs336_basics.train import get_batch, save_checkpoint, load_checkpoint
+
 
 def run_linear(
     d_in: int,
@@ -526,7 +529,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -558,7 +561,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy_loss(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
@@ -577,7 +580,7 @@ def get_adamw_cls() -> type[torch.optim.Optimizer]:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    return AdamW #torch.optim.AdamW
 
 
 def run_get_lr_cosine_schedule(
@@ -624,7 +627,12 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    return save_checkpoint(
+        model=model,
+        optimizer=optimizer,
+        iteration=iteration,
+        out=out,
+    )
 
 
 def run_load_checkpoint(
@@ -645,7 +653,11 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    return load_checkpoint(
+        src=src,
+        model=model,
+        optimizer=optimizer,
+    )
 
 
 def get_tokenizer(

@@ -45,7 +45,7 @@ class AdamW(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
     
-    def step(self, closure: Optional[Callable[[], float]] = None):
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]: #type: ignore
         loss = None if closure is None else closure()        
         for group in self.param_groups:
             beta1, beta2 = group['betas']

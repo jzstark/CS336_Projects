@@ -37,8 +37,8 @@ def get_tokenizer(config):
         vocab_size = config['vocab_size']
 
         tokenizer = Tokenizer(models.BPE())
-        tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern, behavior="isolated", invert=False)
-        trainer = trainers.BpeTrainer(vocab_size=vocab_size, special_tokens=special_tokens)
+        tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern, behavior="isolated", invert=False) #type: ignore
+        trainer = trainers.BpeTrainer(vocab_size=vocab_size, special_tokens=special_tokens) #type: ignore
 
         tokenizer.train([config['token_training_data_path']], trainer)
         tokenizer_path.parent.mkdir(parents=True, exist_ok=True)

@@ -175,9 +175,9 @@ class RotaryPositionalEmbedding(torch.nn.Module):
             x[..., i, :] = tmp_x.clone()
         return result
         """
-
-        cos = self.cosine[..., token_positions, :]  # (..., seq_len, d_k//2)
-        sin = self.sine[..., token_positions, :]    # (..., seq_len, d_k//2)
+        # (..., seq_len, d_k//2)
+        cos = self.cosine[..., token_positions, :]  # type: ignore
+        sin = self.sine[..., token_positions, :]    # type: ignore
         # Split last dim into pairs
         x1 = x[..., ::2]
         x2 = x[..., 1::2]

@@ -84,6 +84,39 @@ def get_batch(tokens: npt.NDArray,
     return input_tensor, target_tensor
 
 
+def temperature_softmax(logits: Tensor, dim=-1, temperature: float = 1.0) -> Tensor:
+    """
+    Apply temperature scaling to logits and return the softmax probabilities.
+    """
+    if temperature <= 0:
+        raise ValueError("Temperature must be greater than 0")
+    scaled_logits = logits / temperature
+    return torch.softmax(scaled_logits, dim=dim)
+
+
+#TODO: Implementation not exactly checked yet, but looks good.  
+def top_p_sampling(probs: Tensor, p: float = 0.9) -> Tensor:
+    """
+    Apply top-p sampling to logits and return the sampled token.
+    """
+    assert torch.allclose(torch.sum(probs), torch.tensor(1.0), atol=1e-6)
+    
+    sorted_logits, sorted_indices = torch.sort(probs, descending=True)
+    cumulative_probs = torch.cumsum(sorted_logits, dim=-1)
+    
+    # Filter out tokens with cumulative probability above p
+    sorted_indices_to_remove = cumulative_probs > p
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0  # Keep the first token
+    filtered_logits = sorted_logits.masked_fill(sorted_indices_to_remove, float('-inf'))
+    
+    # Sample from the filtered logits
+    sampled_idx_in_sorted = torch.multinomial(torch.softmax(filtered_logits, dim=-1), num_samples=1).squeeze()
+    # Map back to original token index
+    sampled_token = sorted_indices[sampled_idx_in_sorted]
+    return sampled_token
+
+
 def generate(model, tokenizer, prompt, device, max_len = 100):
     model.eval()
     input_tokens : List[Int] = tokenizer.encode(prompt).ids
@@ -94,11 +127,12 @@ def generate(model, tokenizer, prompt, device, max_len = 100):
         while len(input_tokens) < max_len:
             input_tensor = torch.tensor(input_tokens, dtype=torch.long, device=device).unsqueeze(0)
             output = model(input_tensor)
-            last_probs = torch.softmax(output[0, -1], dim=-1)
-            next_token = int(torch.argmax(last_probs).item())
+            # Get the last token's logits
+            last_probs = temperature_softmax(output[0, -1], dim=-1)
+            next_token = top_p_sampling(last_probs, p=0.9).item()
+            #next_token = int(torch.argmax(last_probs).item())
             if next_token in special_tokens_id:
                 break
-
             input_tokens.append(next_token)
 
     generated_text = tokenizer.decode(input_tokens)

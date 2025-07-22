@@ -4,6 +4,7 @@ import time
 import os
 
 
+PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 def load_merges_as_bytes(filepath: str) -> list[tuple[bytes, bytes]]:
     merges = []
@@ -21,9 +22,8 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> \
     tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     # Create a Byte-Pair Encoding model
     tokenizer = Tokenizer(models.BPE())
-    pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    pattern = PAT
     tokenizer.pre_tokenizer = Split(pattern, behavior="isolated", invert=False)
-    
 
     # Trainer
     trainer = trainers.BpeTrainer(vocab_size = vocab_size, special_tokens= special_tokens)

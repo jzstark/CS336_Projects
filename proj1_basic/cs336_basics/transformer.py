@@ -390,3 +390,19 @@ class Transformer(torch.nn.Module):
         x = self.linear_out(x)
         #NOTE: only returning x passes the tests, but the diagram shows there is a final softmax layer 
         return x #softmax(x, dim=-1)
+
+
+def get_model(config, vocab_size, dtype=torch.float32) -> Transformer:
+    return Transformer(
+        vocab_size=vocab_size,
+        context_length=config['context_length'],
+        num_layers=config['num_layers'],
+        d_model=config['d_model'],
+        num_heads=config['num_heads'],
+        d_ff=config['d_ff'],
+        max_seq_len=config['max_seq_len'],
+        theta=config['theta'],
+        use_rope=config['use_rope'],
+        device=torch.device(config['device']),
+        dtype=dtype
+    )

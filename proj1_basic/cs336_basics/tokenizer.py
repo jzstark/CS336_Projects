@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Iterator
-from .bpe_token import bpe_train, PAT
+from bpe import bpe_train, PAT
 import regex as re
 
 # This implementation's result still not exactly the same as some reference (5 fail, 18 pass), 

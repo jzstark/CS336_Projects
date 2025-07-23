@@ -9,8 +9,8 @@ def get_config():
         'd_ff': 1344,
         'theta': 10000, # for RoPE
         'num_layers': 4, #48
-        'num_heads': 32, #16, <----- Error: num_heads must be the same as batch_size
-        'batch_size': 32,
+        'num_heads': 64, #16, <----- Error: num_heads must be the same as batch_size
+        'batch_size': 64,
         'learning_rate': 1e-4,
         'num_epochs': 20,
         'seq_len': 350,
@@ -22,11 +22,14 @@ def get_config():
         'model_folder': './weights',
         'model_basename': 'tmodel_',
         'preload': None, 
-        'save_intervals': 10,
+        'save_interval': 1,
         'log_interval': 1,
+        'validation_batch_size': 64, # <--- Here too 
         'tokenizer_file': 'tmp_token/tokenizer.json',
-        'training_text_file': '../tests/fixtures/corpus.en',
-        'training_data_path': 'tmp_data/tokens.npy',
+        'training_text_file': '../data/TinyStoriesV2-GPT4-train.txt',
+        'training_data_path': 'tmp_data/tinystory_training_tokens.npy',
+        'validation_text_file': '../data/TinyStoriesV2-GPT4-valid.txt',
+        'validation_data_path': 'tmp_data/tinystory_validation_tokens.npy',
         'experiment_name': 'runs/tmodel',
         'datasource': 'opus_books',
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'

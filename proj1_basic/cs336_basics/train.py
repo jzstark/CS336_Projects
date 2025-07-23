@@ -20,6 +20,7 @@ from config import get_config
 from transformer import get_model
 import numpy as np
 from tqdm import tqdm
+from datetime import datetime
 
 from jaxtyping import Int
 from typing import List
@@ -140,38 +141,75 @@ def generate(model, tokenizer, prompt, device, max_len = 100):
     print("Generated text:", generated_text)
 
 
-def prepare_training_data(config, tokenizer, update_data=False):
+def prepare_data(config, tokenizer, training=True, update_data=False, chunk_size=1024*1024):
     """
-    Prepare the training data by tokenizing the input text and saving it as a memory-mapped file.
+    Prepare the training/validation data by tokenizing the input text and saving it as a memory-mapped file.
+    Processes the file in chunks to reduce memory usage.
     """
-    training_data_path = Path(config['training_data_path'])
-    training_text_file = Path(config['training_text_file'])
-    if update_data or not training_data_path.exists():
-        with open(training_text_file, 'r', encoding='utf-8') as f:
-            text = f.read()
-        
-        tokens = tokenizer.encode(text).ids
-        tokens = np.array(tokens, dtype=np.int32)
-        
-        # Save as memory-mapped file
-        training_data_path.parent.mkdir(parents=True, exist_ok=True)
-        np.memmap(training_data_path, dtype=np.int32, mode='w+', shape=tokens.shape)[:] = tokens
-        print(f"Training data saved to {training_data_path}")
+    if training:
+        data_path = Path(config['training_data_path'])
+        text_file = Path(config['training_text_file'])
     else:
-        print(f"Training data already exists at {training_data_path}")
+        data_path = Path(config['validation_data_path'])
+        text_file = Path(config['validation_text_file'])
+    if update_data or not data_path.exists():
+        data_path.parent.mkdir(parents=True, exist_ok=True)
+        # First pass: count total tokens
+        total_tokens = 0
+        with open(text_file, 'r', encoding='utf-8') as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                total_tokens += len(tokenizer.encode(chunk).ids)
+        # Second pass: tokenize and write to memmap
+        memmap_arr = np.memmap(data_path, dtype=np.int32, mode='w+', shape=(total_tokens,))
+        idx = 0
+        with open(text_file, 'r', encoding='utf-8') as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                token_ids = tokenizer.encode(chunk).ids
+                memmap_arr[idx:idx+len(token_ids)] = token_ids
+                idx += len(token_ids)
+        memmap_arr.flush()
+        print(f"Data saved to {data_path}")
+    else:
+        print(f"Data already exists at {data_path}")
+
+
+def evaluate(model, tokens, batch_size, context_length, device):
+    model.eval()
+    losses = []
+    with torch.no_grad():
+        num_batches = len(tokens) // batch_size
+        for _ in range(num_batches):
+            # print(f"Evaluating batch {_+1}/{num_batches}")
+            input_tensor, target_tensor = get_batch(tokens, batch_size, context_length, device)
+            output = model(input_tensor)
+            loss = torch.nn.functional.cross_entropy(output.view(-1, output.size(-1)), target_tensor.view(-1))
+            losses.append(loss.item())
+    model.train()
+    return np.mean(losses)
 
 
 def train(config, model):
     device = config['device']
     model.train()
     
-    # Load training data
+    # Load training and validation data
     tokens = np.memmap(Path(config['training_data_path']), dtype=np.int32, mode='r')
+    val_tokens = np.memmap(Path(config['validation_data_path']), dtype=np.int32, mode='r')
     
     optimizer = AdamW(model.parameters(), lr=config['learning_rate'])
     
     for epoch in range(config['num_epochs']):
         num_batches = len(tokens) // config['batch_size']
+
+        val_loss = evaluate(model, val_tokens, config['validation_batch_size'], config['context_length'], device)
+        print(f"Validation loss after epoch {epoch+1}: {val_loss:.4f}")
+        
 
         with tqdm(range(0, len(tokens), config['batch_size']), total=num_batches, desc=f"Epoch {epoch+1}") as pbar:
             for batch_idx in pbar:
@@ -198,26 +236,33 @@ def train(config, model):
                 #    param_group['lr'] = lr
 
                 optimizer.step()
-                
-                #if batch_idx % config['log_interval'] == 0:
-                #    print(f"Epoch [{epoch+1}/{config['num_epochs']}], Batch [{batch_idx}], Loss: {loss.item()}")
                 pbar.set_postfix(loss=loss.item())
-    
+        
+
         # Save the model
         if epoch % config['save_interval'] == 0 or epoch == config['num_epochs'] - 1:
             save_path = Path(config['model_folder'] + f"/{config['model_basename']}{epoch+1}.pt")
-            torch.save(model.state_dict(), config['model_save_path'])
-            print(f"Saving model to {config['model_save_path']}")
-
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), save_path)
+            print(f"Saving model to {save_path}")
+        
+       
+        
 
 if __name__ == "__main__":
     config = get_config()
     model = get_model(config, vocab_size=config['vocab_size']).to(config['device'])
     tokenizer = get_tokenizer(config)
-    prepare_training_data(config, tokenizer, update_data=False)
+    
+    print(f"Preparing training data...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    prepare_data(config, tokenizer, training=True, update_data=False)
+    print(f"Preparing validation data...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    prepare_data(config, tokenizer, training=False, update_data=False)
 
+    print(f"Start training...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     train(config, model)
 
+    print(f"Finish Training, a simple check ...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     prompt = "in a larger sense, we can not dedicate"
     generate(model, tokenizer, prompt, config['device'], max_len=100)
 

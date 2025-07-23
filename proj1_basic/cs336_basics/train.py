@@ -139,12 +139,63 @@ def generate(model, tokenizer, prompt, device, max_len = 100):
     print("Generated text:", generated_text)
 
 
+def prepare_training_data(config, tokenizer, update_data=False):
+    """
+    Prepare the training data by tokenizing the input text and saving it as a memory-mapped file.
+    """
+    training_data_path = Path(config['training_data_path'])
+    training_text_file = Path(config['training_text_file'])
+    if update_data or not training_data_path.exists():
+        with open(training_text_file, 'r', encoding='utf-8') as f:
+            text = f.read()
+        
+        tokens = tokenizer.encode(text).ids
+        tokens = np.array(tokens, dtype=np.int32)
+        
+        # Save as memory-mapped file
+        training_data_path.parent.mkdir(parents=True, exist_ok=True)
+        np.memmap(training_data_path, dtype=np.int32, mode='w+', shape=tokens.shape)[:] = tokens
+        print(f"Training data saved to {training_data_path}")
+    else:
+        print(f"Training data already exists at {training_data_path}")
+
+
+def train(config, model):
+    device = config['device']
+    model.train()
+    
+    # Load training data
+    tokens = np.memmap(Path(config['training_data_path']), dtype=np.int32, mode='r')
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
+    
+    for epoch in range(config['num_epochs']):
+        for batch_idx in range(0, len(tokens), config['batch_size']):
+            input_tensor, target_tensor = get_batch(tokens, config['batch_size'], config['context_length'], device)
+            
+            optimizer.zero_grad()
+            output = model(input_tensor)
+            loss = torch.nn.functional.cross_entropy(output.view(-1, output.size(-1)), target_tensor.view(-1))
+            loss.backward()
+            optimizer.step()
+            
+            if batch_idx % config['log_interval'] == 0:
+                print(f"Epoch [{epoch+1}/{config['num_epochs']}], Batch [{batch_idx}], Loss: {loss.item()}")
+    
+        # Save the model
+        if epoch % config['save_interval'] == 0 or epoch == config['num_epochs'] - 1:
+            save_path = Path(config['model_folder'] + f"/{config['model_basename']}{epoch+1}.pt")
+            torch.save(model.state_dict(), config['model_save_path'])
+            print(f"Saving model to {config['model_save_path']}")
+
+
 if __name__ == "__main__":
     config = get_config()
     model = get_model(config, vocab_size=config['vocab_size']).to(config['device'])
     tokenizer = get_tokenizer(config)
+    prepare_training_data(config, tokenizer, update_data=False)
 
-    # train(config, model, tokenizer)
+    train(config, model)
 
     prompt = "in a larger sense, we can not dedicate"
     generate(model, tokenizer, prompt, config['device'], max_len=100)

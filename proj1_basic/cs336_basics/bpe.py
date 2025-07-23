@@ -23,10 +23,10 @@ def bpe_train(input_path: str, vocab_size: int, special_tokens: list[str]) -> \
     # Create a Byte-Pair Encoding model
     tokenizer = Tokenizer(models.BPE())
     pattern = PAT
-    tokenizer.pre_tokenizer = Split(pattern, behavior="isolated", invert=False)
+    tokenizer.pre_tokenizer = Split(pattern, behavior="isolated", invert=False) #type: ignore
 
     # Trainer
-    trainer = trainers.BpeTrainer(vocab_size = vocab_size, special_tokens= special_tokens)
+    trainer = trainers.BpeTrainer(vocab_size = vocab_size, special_tokens= special_tokens) #type: ignore
 
     #start = time.time()
     tokenizer.train([input_path], trainer)

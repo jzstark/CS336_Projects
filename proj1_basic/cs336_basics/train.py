@@ -19,14 +19,15 @@ from pathlib import Path
 from config import get_config
 from transformer import get_model
 import numpy as np
+from tqdm import tqdm
 
 from jaxtyping import Int
 from typing import List
 from torch import Tensor
 import numpy.typing as npt
 
-
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers
+from learning import learning_rate_schedule, gradient_clipping, AdamW
 
 special_tokens = ["<|endoftext|>"]
 pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -167,20 +168,40 @@ def train(config, model):
     # Load training data
     tokens = np.memmap(Path(config['training_data_path']), dtype=np.int32, mode='r')
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
+    optimizer = AdamW(model.parameters(), lr=config['learning_rate'])
     
     for epoch in range(config['num_epochs']):
-        for batch_idx in range(0, len(tokens), config['batch_size']):
-            input_tensor, target_tensor = get_batch(tokens, config['batch_size'], config['context_length'], device)
-            
-            optimizer.zero_grad()
-            output = model(input_tensor)
-            loss = torch.nn.functional.cross_entropy(output.view(-1, output.size(-1)), target_tensor.view(-1))
-            loss.backward()
-            optimizer.step()
-            
-            if batch_idx % config['log_interval'] == 0:
-                print(f"Epoch [{epoch+1}/{config['num_epochs']}], Batch [{batch_idx}], Loss: {loss.item()}")
+        num_batches = len(tokens) // config['batch_size']
+
+        with tqdm(range(0, len(tokens), config['batch_size']), total=num_batches, desc=f"Epoch {epoch+1}") as pbar:
+            for batch_idx in pbar:
+                input_tensor, target_tensor = get_batch(tokens, config['batch_size'], config['context_length'], device)
+                
+                optimizer.zero_grad()
+                output = model(input_tensor)
+                loss = torch.nn.functional.cross_entropy(output.view(-1, output.size(-1)), target_tensor.view(-1))
+                loss.backward()
+
+                ## Gradient clipping (before optimizer.step)
+                #gradient_clipping(model.parameters(), config['max_grad_norm'])
+                #
+                ## Learning rate scheduling (update optimizer's lr)
+                #t = epoch * (len(tokens) // config['batch_size']) + (batch_idx // config['batch_size'])
+                #lr = learning_rate_schedule(
+                #    t,
+                #    config['learning_rate'],
+                #    config['min_learning_rate'],
+                #    config['warmup_iters'],
+                #    config['cosine_cycle_iters']
+                #)
+                #for param_group in optimizer.param_groups:
+                #    param_group['lr'] = lr
+
+                optimizer.step()
+                
+                #if batch_idx % config['log_interval'] == 0:
+                #    print(f"Epoch [{epoch+1}/{config['num_epochs']}], Batch [{batch_idx}], Loss: {loss.item()}")
+                pbar.set_postfix(loss=loss.item())
     
         # Save the model
         if epoch % config['save_interval'] == 0 or epoch == config['num_epochs'] - 1:

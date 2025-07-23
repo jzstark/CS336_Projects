@@ -3,19 +3,19 @@ import torch
 
 def get_config():
     config = {
+        'vocab_size': 10000,
+        'context_length' : 256,
+        'd_model': 512,
+        'd_ff': 1344,
+        'theta': 10000, # for RoPE
+        'num_layers': 4, #48
+        'num_heads': 32, #16, <----- Error: num_heads must be the same as batch_size
         'batch_size': 32,
-        'num_epochs': 25,
         'learning_rate': 1e-4,
-        'd_model': 1600,
-        'context_length' : 1024,
-        'num_layers': 16, #48
-        'num_heads': 25,
-        'd_ff': 6400,
-        'vocab_size': 50257,
+        'num_epochs': 20,
         'seq_len': 350,
         'max_seq_len': 2048,
         'dropout': 0.1,
-        'theta': 0.5,
         'use_rope': True,
         'lang_src': 'en',
         'lang_tgt': 'it',

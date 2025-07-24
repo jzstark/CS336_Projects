@@ -132,10 +132,16 @@ class RotaryPositionalEmbedding(torch.nn.Module):
     def forward(self, x: Float[Tensor, " ...  seq_len d_k"], 
                 token_positions: Int[Tensor, "... seq_len"]) -> \
                 Float[Tensor, "... seq_len d_k"]:
+        
+        #assert len(x.shape) - 1 == len(token_positions.shape)
+        # NOTE: it seems that this assertion does not have to be true in the test, but should be very careful... 
+        
         assert x.shape[-1] == self.d_k, \
             f"Input tensor last dimension {x.shape[-1]} does not match d_k {self.d_k}"
+
         assert token_positions.shape[-1] == x.shape[-2], \
-            f"Token positions length {token_positions.shape[-1]} does not match sequence length {x.shape[-2]}"
+            f"token_positions length {token_positions.shape[-1]} does not match seq_len {x.shape[-2]}"
+        
         input_shape = x.shape
         seq_len = input_shape[-2]
         if seq_len > self.max_seq_len:
@@ -178,6 +184,9 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         # (..., seq_len, d_k//2)
         cos = self.cosine[..., token_positions, :]  # type: ignore
         sin = self.sine[..., token_positions, :]    # type: ignore
+
+        #print(f"cosine shape: {cos.shape}, sine shape: {sin.shape}, x shape: {x.shape}, token_positions shape: {token_positions.shape}")
+
         # Split last dim into pairs
         x1 = x[..., ::2]
         x2 = x[..., 1::2]
@@ -272,10 +281,14 @@ class MultiHeadAttention(torch.nn.Module):
         # Apply Rotary Positional Embedding to query and key
         if self.use_rope:
             if self.token_positions is None:
-                token_positions = torch.arange(seq_len, device=self.device).unsqueeze(0).expand(batch_size, -1)
+                batch_shape = query.shape[:-2]
+                seq_len = query.shape[-2]
+                token_positions = torch.arange(seq_len, device=self.device)
+                token_positions = token_positions.expand(*batch_shape, seq_len)
             else:
                 assert self.token_positions.shape[-1] == seq_len, \
                     f"token_positions length {self.token_positions.shape[0]} does not match seq_len {seq_len}"
+                
                 token_positions = self.token_positions
             # rope: input: (..., seq_len, d), token_positions: (1, seq_len) or (seq_len,)
             query = self.rope(query, token_positions)

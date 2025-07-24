@@ -16,18 +16,17 @@ service like Weights and Biases).a
 """
 import torch 
 from pathlib import Path
-from config import get_config
-from transformer import get_model
 import numpy as np
 from tqdm import tqdm
 from datetime import datetime
-
 from jaxtyping import Int
 from typing import List
 from torch import Tensor
 import numpy.typing as npt
-
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers
+
+from config import get_config
+from transformer import get_model
 from learning import learning_rate_schedule, gradient_clipping, AdamW
 
 special_tokens = ["<|endoftext|>"]

@@ -9,7 +9,7 @@ def get_config():
         'd_ff': 1344,
         'theta': 10000, # for RoPE
         'num_layers': 4, #48
-        'num_heads': 64, #16, <----- Error: num_heads must be the same as batch_size
+        'num_heads': 16,
         'batch_size': 64,
         'learning_rate': 1e-4,
         'num_epochs': 20,
@@ -24,7 +24,7 @@ def get_config():
         'preload': None, 
         'save_interval': 1,
         'log_interval': 1,
-        'validation_batch_size': 64, # <--- Here too 
+        'validation_batch_size': 128,
         'tokenizer_file': 'tmp_token/tokenizer.json',
         'training_text_file': '../data/TinyStoriesV2-GPT4-train.txt',
         'training_data_path': 'tmp_data/tinystory_training_tokens.npy',

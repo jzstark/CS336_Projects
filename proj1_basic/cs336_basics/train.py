@@ -24,6 +24,7 @@ from typing import List
 from torch import Tensor
 import numpy.typing as npt
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers
+from torch.utils.tensorboard import SummaryWriter
 
 from config import get_config
 from transformer import get_model
@@ -31,6 +32,20 @@ from learning import learning_rate_schedule, gradient_clipping, AdamW
 
 special_tokens = ["<|endoftext|>"]
 pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+
+#TODO: not sure if this works ... 
+def token_batch_iterator(file_path, batch_size=10000):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        batch = []
+        for line in f:
+            batch.append(line.strip())
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+
 
 def get_tokenizer(config):
     tokenizer_path = Path(config['tokenizer_file'])
@@ -41,7 +56,10 @@ def get_tokenizer(config):
         tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern, behavior="isolated", invert=False) #type: ignore
         trainer = trainers.BpeTrainer(vocab_size=vocab_size, special_tokens=special_tokens) #type: ignore
 
-        tokenizer.train([config['token_training_data_path']], trainer)
+        #tokenizer.train([config['training_text_file']], trainer)
+        batch_iter = token_batch_iterator(config['training_text_file'])
+        tokenizer.train_from_iterator(batch_iter, trainer=trainer)
+
         tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
         tokenizer.save(str(tokenizer_path))
 
@@ -183,9 +201,12 @@ def evaluate(model, tokens, batch_size, context_length, device):
     losses = []
     with torch.no_grad():
         num_batches = len(tokens) // batch_size
-        for _ in range(num_batches):
+        #for _ in range(num_batches):
+        for _ in range(100): #HACK: For testing, limit to 100 batches
             # print(f"Evaluating batch {_+1}/{num_batches}")
             input_tensor, target_tensor = get_batch(tokens, batch_size, context_length, device)
+            input_tensor = input_tensor.to(device)
+            target_tensor = target_tensor.to(device)
             output = model(input_tensor)
             loss = torch.nn.functional.cross_entropy(output.view(-1, output.size(-1)), target_tensor.view(-1))
             losses.append(loss.item())
@@ -196,19 +217,19 @@ def evaluate(model, tokens, batch_size, context_length, device):
 def train(config, model):
     device = config['device']
     model.train()
+    writer = SummaryWriter(log_dir=Path(config.get('tensorboard_logdir', './tb_log')))
     
     # Load training and validation data
-    tokens = np.memmap(Path(config['training_data_path']), dtype=np.int32, mode='r')
+    # tokens = np.memmap(Path(config['training_data_path']), dtype=np.int32, mode='r')
+
+    # For testing, we use a small subset of the training data
+    tokens = np.memmap(Path(config['validation_data_path']), dtype=np.int32, mode='r')
     val_tokens = np.memmap(Path(config['validation_data_path']), dtype=np.int32, mode='r')
     
     optimizer = AdamW(model.parameters(), lr=config['learning_rate'])
     
     for epoch in range(config['num_epochs']):
         num_batches = len(tokens) // config['batch_size']
-
-        val_loss = evaluate(model, val_tokens, config['validation_batch_size'], config['context_length'], device)
-        print(f"Validation loss after epoch {epoch+1}: {val_loss:.4f}")
-        
 
         with tqdm(range(0, len(tokens), config['batch_size']), total=num_batches, desc=f"Epoch {epoch+1}") as pbar:
             for batch_idx in pbar:
@@ -223,20 +244,25 @@ def train(config, model):
                 #gradient_clipping(model.parameters(), config['max_grad_norm'])
                 #
                 ## Learning rate scheduling (update optimizer's lr)
-                #t = epoch * (len(tokens) // config['batch_size']) + (batch_idx // config['batch_size'])
-                #lr = learning_rate_schedule(
-                #    t,
-                #    config['learning_rate'],
-                #    config['min_learning_rate'],
-                #    config['warmup_iters'],
-                #    config['cosine_cycle_iters']
-                #)
-                #for param_group in optimizer.param_groups:
-                #    param_group['lr'] = lr
-
+                t = epoch * (len(tokens) // config['batch_size']) + (batch_idx // config['batch_size'])
+                lr = learning_rate_schedule(
+                    t,
+                    config['learning_rate'],
+                    config['min_learning_rate'],
+                    config['warmup_iters'],
+                    config['cosine_cycle_iters']
+                )
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = lr
+                
                 optimizer.step()
+
+                # log into TensorBoard
+                global_step = batch_idx + epoch * num_batches
+                writer.add_scalar('Loss/train', loss.item(), global_step)
+                writer.add_scalar('LearningRate', lr, global_step)
+                
                 pbar.set_postfix(loss=loss.item())
-        
 
         # Save the model
         if epoch % config['save_interval'] == 0 or epoch == config['num_epochs'] - 1:
@@ -245,14 +271,19 @@ def train(config, model):
             torch.save(model.state_dict(), save_path)
             print(f"Saving model to {save_path}")
         
-       
-        
+        val_loss = evaluate(model, val_tokens, config['validation_batch_size'], config['context_length'], device)
+        print(f"Validation loss after epoch {epoch+1}: {val_loss:.4f}")
+        writer.add_scalar('Loss/val', val_loss, epoch)
+
 
 if __name__ == "__main__":
     config = get_config()
     model = get_model(config, vocab_size=config['vocab_size']).to(config['device'])
+    
+    print("Building tokenizer...")
     tokenizer = get_tokenizer(config)
     
+    """
     print(f"Preparing training data...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     prepare_data(config, tokenizer, training=True, update_data=False)
     print(f"Preparing validation data...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -264,4 +295,5 @@ if __name__ == "__main__":
     print(f"Finish Training, a simple check ...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     prompt = "in a larger sense, we can not dedicate"
     generate(model, tokenizer, prompt, config['device'], max_len=100)
+    """
 

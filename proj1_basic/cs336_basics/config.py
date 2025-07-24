@@ -3,35 +3,43 @@ import torch
 
 def get_config():
     config = {
+        # Fixed hyperparameters
         'vocab_size': 10000,
         'context_length' : 256,
         'd_model': 512,
         'd_ff': 1344,
-        'theta': 10000, # for RoPE
-        'num_layers': 4, #48
+        'num_layers': 4,
         'num_heads': 16,
-        'batch_size': 64,
+        # learning rate scheduling
         'learning_rate': 1e-4,
-        'num_epochs': 20,
-        'seq_len': 350,
-        'max_seq_len': 2048,
-        'dropout': 0.1,
+        'min_learning_rate': 1e-5,
+        'warmup_iters': 2000,
+        'cosine_cycle_iters': 100000, 
+        #RoPE
         'use_rope': True,
-        'lang_src': 'en',
-        'lang_tgt': 'it',
-        'model_folder': './weights',
-        'model_basename': 'tmodel_',
-        'preload': None, 
+        'theta': 10000, 
+
+        # Other 
+        'batch_size': 64,
+        'num_epochs': 5,
+        'validation_batch_size': 128,
+        #'seq_len': 350,
+        'max_seq_len': 512,
         'save_interval': 1,
         'log_interval': 1,
-        'validation_batch_size': 128,
+        'dropout': 0.1,
+
+        # Paths
         'tokenizer_file': 'tmp_token/tokenizer.json',
         'training_text_file': '../data/TinyStoriesV2-GPT4-train.txt',
         'training_data_path': 'tmp_data/tinystory_training_tokens.npy',
         'validation_text_file': '../data/TinyStoriesV2-GPT4-valid.txt',
         'validation_data_path': 'tmp_data/tinystory_validation_tokens.npy',
+        'tensorboard_logdir': 'tb_log/',
         'experiment_name': 'runs/tmodel',
         'datasource': 'opus_books',
+        'model_folder': './weights',
+        'model_basename': 'tmodel_',
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }
     return config

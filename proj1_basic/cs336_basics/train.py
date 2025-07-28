@@ -35,7 +35,7 @@ pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S
 
 
 #TODO: not sure if this works ... 
-def token_batch_iterator(file_path, batch_size=10000):
+def token_batch_iterator(file_path, batch_size=100):
     with open(file_path, 'r', encoding='utf-8') as f:
         batch = []
         for line in f:
@@ -58,7 +58,7 @@ def get_tokenizer(config):
 
         #tokenizer.train([config['training_text_file']], trainer)
         batch_iter = token_batch_iterator(config['training_text_file'])
-        tokenizer.train_from_iterator(batch_iter, trainer=trainer)
+        tokenizer.train_from_iterator(batch_iter, trainer=trainer, length=None)
 
         tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
         tokenizer.save(str(tokenizer_path))

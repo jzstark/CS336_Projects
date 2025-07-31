@@ -23,43 +23,72 @@ from jaxtyping import Int
 from typing import List
 from torch import Tensor
 import numpy.typing as npt
-from tokenizers import Tokenizer, models, trainers, pre_tokenizers
+
+from tokenizers import Tokenizer#, models, trainers, pre_tokenizers
+from tokenizers.models import WordLevel
+from tokenizers.trainers import WordLevelTrainer
+from tokenizers.pre_tokenizers import Whitespace
+
 from torch.utils.tensorboard import SummaryWriter
 
 from config import get_config
 from transformer import get_model
 from learning import learning_rate_schedule, gradient_clipping, AdamW
 
-special_tokens = ["<|endoftext|>"]
+special_tokens = ["<|endoftext|>", "[UNK]"]
 pattern = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+"""
+TODO: This shit takes >100 GB memory for processing only 2GB input data. 
+# This blog shows a similar problem, but the solution does not work for my case.
+# https://discuss.huggingface.co/t/run-clm-py-why-does-the-tokenizer-phase-use-so-much-memory-288gb-for-2gb-input-data/71718
 
-#TODO: not sure if this works ... 
-def token_batch_iterator(file_path, batch_size=100):
+
+# not sure if this works ... 
+def token_line_iterator(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
-        batch = []
         for line in f:
-            batch.append(line.strip())
-            if len(batch) >= batch_size:
-                yield batch
-                batch = []
-        if batch:
-            yield batch
+            yield line.strip()
 
 
 def get_tokenizer(config):
     tokenizer_path = Path(config['tokenizer_file'])
-    if not Path.exists(tokenizer_path):
+    if not tokenizer_path.exists():
         vocab_size = config['vocab_size']
-
         tokenizer = Tokenizer(models.BPE())
-        tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern, behavior="isolated", invert=False) #type: ignore
-        trainer = trainers.BpeTrainer(vocab_size=vocab_size, special_tokens=special_tokens) #type: ignore
+        tokenizer.pre_tokenizer = pre_tokenizers.Split(pattern, behavior="isolated", invert=False)
+        trainer = trainers.BpeTrainer(vocab_size=vocab_size, special_tokens=special_tokens)
 
-        #tokenizer.train([config['training_text_file']], trainer)
-        batch_iter = token_batch_iterator(config['training_text_file'])
-        tokenizer.train_from_iterator(batch_iter, trainer=trainer, length=None)
+        num_lines = sum(1 for _ in open(config['training_text_file'], 'r', encoding='utf-8'))
+        tokenizer.train_from_iterator(token_line_iterator(config['training_text_file']),
+                                      trainer=trainer,
+                                      length=num_lines)
 
+        tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
+        tokenizer.save(str(tokenizer_path))
+    else:
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+    return tokenizer
+"""
+
+def get_tokenizer(config):
+    tokenizer_path = Path(config['tokenizer_file'])
+
+    if not tokenizer_path.exists():
+        # Create a new WordLevel tokenizer
+        tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))  # type: ignore
+        tokenizer.pre_tokenizer = Whitespace() # type: ignore
+
+        # Set up the trainer
+        trainer = WordLevelTrainer(
+            vocab_size=config['vocab_size'], # type: ignore
+            special_tokens=special_tokens # type: ignore
+        )
+
+        # This reads directly from file, not into memory
+        tokenizer.train([config['training_text_file']], trainer)
+
+        # Save the tokenizer
         tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
         tokenizer.save(str(tokenizer_path))
 
@@ -67,7 +96,6 @@ def get_tokenizer(config):
         tokenizer = Tokenizer.from_file(str(tokenizer_path))
 
     return tokenizer
-
 
 
 def get_batch(tokens: npt.NDArray, 
@@ -276,14 +304,47 @@ def train(config, model):
         writer.add_scalar('Loss/val', val_loss, epoch)
 
 
+def test(config):
+    # load model from checkpoint
+    model = get_model(config, vocab_size=config['vocab_size']).to(config['device'])
+
+    checkpoint_path = Path(config['model_folder']) #/ f"{config['model_basename']}{config['num_epochs']}.pt"
+    # if it does not exist or contain nothing, raise an error
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}") 
+    # find the latest checkpoint file
+    checkpoint_files = list(checkpoint_path.glob(f"{config['model_basename']}*.pt"))
+    if not checkpoint_files:
+        raise FileNotFoundError(f"No checkpoint files found in {checkpoint_path}")  
+    checkpoint_path = max(checkpoint_files, key=lambda f: f.stat().st_mtime)  # Get the most recent file
+    print(f"Loading model from {checkpoint_path}")
+    model.load_state_dict(torch.load(checkpoint_path, map_location=config['device']))
+    model.eval()
+    tokenizer = get_tokenizer(config)
+    print(f"Model loaded from {checkpoint_path}")
+    print("Starting evaluation...")
+
+    # For testing, we use one sentence as input
+    prompt = "Once upon a time there was a little boy"
+    input_ids = tokenizer.encode(prompt)
+    print(f"Input tokens: {input_ids.ids}")
+    input_tensor = torch.tensor(input_ids.ids, dtype=torch.long, device=config['device']).unsqueeze(0)  # Add batch dimension
+    output = model(input_tensor)
+    print(f"Output logits shape: {output.shape}")
+    # Generate text
+    print(f"Generating text with prompt: {prompt}")
+    generate(model, tokenizer, prompt, config['device'], max_len=100)
+
+
 if __name__ == "__main__":
     config = get_config()
-    model = get_model(config, vocab_size=config['vocab_size']).to(config['device'])
     
+    """
     print("Building tokenizer...")
     tokenizer = get_tokenizer(config)
     
-    """
+    model = get_model(config, vocab_size=config['vocab_size']).to(config['device'])
+    
     print(f"Preparing training data...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     prepare_data(config, tokenizer, training=True, update_data=False)
     print(f"Preparing validation data...{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -296,4 +357,5 @@ if __name__ == "__main__":
     prompt = "in a larger sense, we can not dedicate"
     generate(model, tokenizer, prompt, config['device'], max_len=100)
     """
+    test(config)
 

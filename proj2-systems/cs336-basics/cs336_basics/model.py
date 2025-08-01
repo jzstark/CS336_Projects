@@ -147,7 +147,7 @@ class RotaryEmbedding(nn.Module):
         return result
     
     def extra_repr(self):
-        return f"context_length={self._freq_cis_cache.shape[0]}, dim/2={self._freq_cis_cache.shape[1]}"
+        return f"context_length={self._freq_cis_cache.shape[0]}, dim/2={self._freq_cis_cache.shape[1]}" # type: ignore
 
 
 class BasicsTransformerLM(nn.Module):

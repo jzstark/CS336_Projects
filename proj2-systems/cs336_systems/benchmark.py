@@ -10,6 +10,8 @@ import timeit
 import torch
 import numpy as np
 
+import torch.cuda.nvtx as nvtx
+
 
 def build_transformer_model(config, context_length=128):
 
@@ -76,20 +78,59 @@ def time_model(transformer, config, context_length=128, backward=True, n_steps=1
     return fwd_avg, bwd_avg, fwd_dev, bwd_dev
 
 
+@nvtx.range("time_model_ntx")
+def time_model_ntx(transformer, config, context_length=128, backward=True, n_steps=10):
+    batch_size = config['batch_size']
+    context_length = transformer.context_length
+    input_tensor = torch.randint(
+        0, transformer.vocab_size, (batch_size, context_length), 
+        device=config['device']
+    )
+    if backward:
+        transformer.train()
+    else:
+        transformer.eval()
+        
+    # Warm-up
+    with nvtx.range("Warm-up"):
+        for _ in range(5):
+            output_tensor = transformer(input_tensor)
+            if backward:
+                loss = torch.nn.functional.cross_entropy(output_tensor.view(-1, transformer.vocab_size), input_tensor.view(-1))
+                loss.backward()
+            torch.cuda.synchronize()
+    
+    
+    # Measure time
+    for _ in range(n_steps):
+        print(f"Step {_ + 1}/{n_steps}")
+        with nvtx.range(f"Timing Step {_ + 1}/{n_steps} with backward={backward}"):
+            _output = transformer(input_tensor)
+            if backward:
+                _loss = torch.nn.functional.cross_entropy(_output.view(-1, transformer.vocab_size), input_tensor.view(-1))
+                _loss.backward()
+            torch.cuda.synchronize()
 
 
 config_name = "config_large"
 assert legal_config_name(config_name), f"Invalid config name: {config_name}"
 config = get_config(config_name)
 
-context_length = 512
-
+context_length = 256
 
 model = build_transformer_model(config, context_length)
-time_model(model, config, context_length)
+#time_model(model, config, context_length)
+
+#print("forward pass timing")
+#time_model_ntx(model, config, context_length, backward=False)
+
+print("backward pass timing")
+time_model_ntx(model, config, context_length)
 
 
 """
+# Direct timing 
+
 128 context length
 
 Small: 
@@ -109,6 +150,15 @@ xl:
 Forward time: 0.079619 ± 0.003536 seconds
 Backward time: 0.167457 ± 0.000817 seconds
 
+
+256 context length:
+
+Large:
+
+Forward time: 0.119940 ± 0.006997 seconds
+Backward time: 0.154517 ± 0.002929 seconds
+
+
 512 context length:
 
 small:
@@ -121,5 +171,26 @@ Backward time: 0.212388 ± 0.010809 seconds
 
 large:
 Just too long... 
+
+
+# Timing with Nsys 
+
+
+(1) Inference time
+
+Different passes shows very different timing results... 
+Warm-up: 891.3ms 
+1st 10 forward pass: 95ms 
+2nd 10 forward pass: 4.351s 
+3rd: 87.33ms 
+6th: 7.98s 
+
+Something is wrong with the timing... 
+
+Total time: 
+Forward test: 42.7s
+Backward test: 64.3s
+
+(2) 
 
 """

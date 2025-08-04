@@ -12,6 +12,8 @@ import numpy as np
 
 import torch.cuda.nvtx as nvtx
 
+from contextlib import nullcontext
+
 
 def build_transformer_model(config, context_length=128):
 
@@ -27,7 +29,13 @@ def build_transformer_model(config, context_length=128):
     return transformer
 
 
-def time_model(transformer, config, context_length=128, backward=True, n_steps=10):
+def time_model(transformer, config, context_length=128, backward=True, n_steps=10, autocast=False, mem_prof=False):
+    # Choose context based on config or device
+    if autocast and config['device'] == 'cuda':
+        autocast_ctx = torch.autocast(device_type='cuda', dtype=torch.float16)
+    else:
+        autocast_ctx = nullcontext()
+    
     batch_size = config['batch_size']
     context_length = transformer.context_length
     input_tensor = torch.randint(
@@ -48,24 +56,35 @@ def time_model(transformer, config, context_length=128, backward=True, n_steps=1
             loss.backward()
         torch.cuda.synchronize()
     
-    
+    # Start recording memory history.
+    if mem_prof:
+        torch.cuda.memory._record_memory_history(max_entries=1000000)
+
     # Measure time
     forward_time = []
     backward_time = []
     for _ in range(n_steps):
-        print(f"Step {_ + 1}/{n_steps}")
-        start_time = timeit.default_timer()
-        _output = transformer(input_tensor)
-        end_time1 = timeit.default_timer()
-        if backward:
-            _loss = torch.nn.functional.cross_entropy(_output.view(-1, transformer.vocab_size), input_tensor.view(-1))
-            _loss.backward()
-        torch.cuda.synchronize()
-        end_time2 = timeit.default_timer()
+        #TODO: this automatic casting does not seem to work well, even make the running slower... 
+        with autocast_ctx:
+            print(f"Step {_ + 1}/{n_steps}")
+            start_time = timeit.default_timer()
+            _output = transformer(input_tensor)
+            end_time1 = timeit.default_timer()
+            if backward:
+                _loss = torch.nn.functional.cross_entropy(_output.view(-1, transformer.vocab_size), input_tensor.view(-1))
+                _loss.backward()
+            torch.cuda.synchronize()
+            end_time2 = timeit.default_timer()
 
-        forward_time.append(end_time1 - start_time)
-        if backward:
-            backward_time.append(end_time2 - end_time1)
+            forward_time.append(end_time1 - start_time)
+            if backward:
+                backward_time.append(end_time2 - end_time1)
+    if mem_prof:
+        # Dump memory snapshot to a file.
+        print("Dumping memory snapshot...")
+        torch.cuda.memory._dump_snapshot("memory_snapshot.pickle")
+        # Stop recording history.
+        torch.cuda.memory._record_memory_history(enabled=None)
 
     fwd_avg = np.mean(forward_time)
     fwd_dev = np.std(forward_time)
@@ -119,13 +138,13 @@ config = get_config(config_name)
 context_length = 256
 
 model = build_transformer_model(config, context_length)
-#time_model(model, config, context_length)
+time_model(model, config, context_length, backward=True)
 
 #print("forward pass timing")
 #time_model_ntx(model, config, context_length, backward=False)
 
-print("backward pass timing")
-time_model_ntx(model, config, context_length)
+#print("backward pass timing")
+#time_model_ntx(model, config, context_length)
 
 
 """

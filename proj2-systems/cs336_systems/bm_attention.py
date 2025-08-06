@@ -17,11 +17,12 @@ BATCH = 8
 THETA = 10000
 d_head = 1
 
-#d_models = [16,32, 64,128]
-#context_lengths = [256, 1024, 4096, 8192]#, 16384
+MEM_RECORD = False
+d_models = [16,32, 64,128]
+context_lengths = [256, 1024, 4096, 8192]#, 16384
 
-d_models = [128]
-context_lengths = [8192]
+#d_models = [128]
+#context_lengths = [8192]
 
 def run_forward_backward(model, x):
     nvtx.range_push("forward")
@@ -62,6 +63,10 @@ def run(d_model, context_length, n_steps):
     for n in range(n_steps):
         #with torch.autocast(device_type='cuda', dtype=torch.float16):
         attention_model = build_model(d_model, context_length)
+
+        # Compile the model
+        attention_model = torch.compile(attention_model)
+
         input_tensor = torch.randn(BATCH, context_length, d_model).cuda()
         tforward, tbackward = run_forward_backward(attention_model, input_tensor)
         #print(f"Step {n+1} - Forward time: {tforward:.4f}s, Backward time: {tbackward:.4f}s")
@@ -75,7 +80,8 @@ def run(d_model, context_length, n_steps):
     
 
 if __name__ == "__main__":
-    torch.cuda.memory._record_memory_history(max_entries=1000000, stacks='all')
+    if MEM_RECORD:
+        torch.cuda.memory._record_memory_history(max_entries=1000000, stacks='all')
     
     for d_model in d_models:
         for context_length in context_lengths:
@@ -87,9 +93,9 @@ if __name__ == "__main__":
             print(f"  Average Forward Time: {avg_forward_time:.4f}s ± { std_forward_time:.4f}s")
             print(f"  Average Backward Time: {avg_backward_time:.4f}s ± {std_backward_time:.4f}s")
             print("-" * 50)
-        
-    torch.cuda.memory._dump_snapshot("memory_snapshot_attention.pickle")
-    torch.cuda.memory._record_memory_history(enabled=None)
+    if MEM_RECORD:
+        torch.cuda.memory._dump_snapshot("memory_snapshot_attention.pickle")
+        torch.cuda.memory._record_memory_history(enabled=None)
 
 
 """
@@ -163,4 +169,13 @@ Results for d_model=128, context_length=8192:
 Memory usage for d_model=128, context_length=8192: max 13GB; Only forward pass: max 9GB
 
 Actually the peak usage comes from softmax in attention at leas in forward pass. About 4.5G in forward pass.
+"""
+
+
+
+
+"""Compiled version with torch.compile
+
+
+
 """
